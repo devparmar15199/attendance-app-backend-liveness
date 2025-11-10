@@ -47,58 +47,6 @@ export const getAllClasses = async (req, res) => {
   }
 };
 
-// Get class by ID
-export const getClassById = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user.id;
-    const userRole = req.user.role;
-
-    // Validate ObjectId format
-    if (!id || !id.match(/^[0-9a-fA-F]{24}$/)) {
-      return res.status(400).json({ 
-        message: 'Invalid class ID format',
-        error: 'Class ID must be a valid MongoDB ObjectId' 
-      });
-    }
-
-    const classRecord = await Class.findById(id);
-    
-    if (!classRecord) {
-      return res.status(404).json({ message: 'Class not found' });
-    }
-
-    // Check permissions
-    if (userRole === 'student') {
-      const enrollment = await ClassEnrollment.findOne({
-        studentId: userId,
-        classId: id
-      });
-      
-      if (!enrollment) {
-        return res.status(403).json({ message: 'You are not enrolled in this class' });
-      }
-    } else if (userRole === 'teacher' && classRecord.teacherId.toString() !== userId) {
-      return res.status(403).json({ message: 'You do not have access to this class' });
-    }
-
-    res.json({
-      _id: classRecord._id,
-      classNumber: classRecord.classNumber,
-      subjectCode: classRecord.subjectCode,
-      subjectName: classRecord.subjectName,
-      classYear: classRecord.classYear,
-      semester: classRecord.semester,
-      division: classRecord.division,
-      teacherId: classRecord.teacherId
-    });
-
-  } catch (error) {
-    console.error('Get Class By ID Error:', error);
-    res.status(500).json({ message: error.message });
-  }
-};
-
 // Get enrolled classes (for students)
 export const getEnrolledClasses = async (req, res) => {
   try {
@@ -184,6 +132,58 @@ export const getAvailableClasses = async (req, res) => {
   }
 };
 
+// Get class by ID
+export const getClassById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    // Validate ObjectId format
+    if (!id || !id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ 
+        message: 'Invalid class ID format',
+        error: 'Class ID must be a valid MongoDB ObjectId' 
+      });
+    }
+
+    const classRecord = await Class.findById(id);
+    
+    if (!classRecord) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    // Check permissions
+    if (userRole === 'student') {
+      const enrollment = await ClassEnrollment.findOne({
+        studentId: userId,
+        classId: id
+      });
+      
+      if (!enrollment) {
+        return res.status(403).json({ message: 'You are not enrolled in this class' });
+      }
+    } else if (userRole === 'teacher' && classRecord.teacherId.toString() !== userId) {
+      return res.status(403).json({ message: 'You do not have access to this class' });
+    }
+
+    res.json({
+      _id: classRecord._id,
+      classNumber: classRecord.classNumber,
+      subjectCode: classRecord.subjectCode,
+      subjectName: classRecord.subjectName,
+      classYear: classRecord.classYear,
+      semester: classRecord.semester,
+      division: classRecord.division,
+      teacherId: classRecord.teacherId
+    });
+
+  } catch (error) {
+    console.error('Get Class By ID Error:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // Student self-enrollment in a class
 export const enrollInClass = async (req, res) => {
   try {
@@ -262,6 +262,65 @@ export const enrollInClass = async (req, res) => {
       success: false,
       message: 'Failed to enroll in class',
       error: error.message 
+    });
+  }
+};
+
+/**
+ * @desc    Student self-unenrollment from a class
+ * @route   DELETE /api/classes/:classId/unenroll
+ * @access  Private (Student)
+ */
+export const unenrollFromClass = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const studentId = req.user.id;
+
+    // 1. Check user role
+    if (req.user.role !== 'student') {
+      return res.status(403).json({
+        success: false,
+        message: 'This endpoint is only for students'
+      });
+    }
+
+    // 2. Validate ObjectId format
+    if (!classId || !classId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid class ID format',
+        error: 'Class ID must be a valid MongoDB ObjectId'
+      });
+    }
+
+    // 3. Find the enrollment
+    const enrollment = await ClassEnrollment.findOne({
+      classId: classId,
+      studentId: studentId
+    });
+
+    // 4. Check if enrollment exists
+    if (!enrollment) {
+      return res.status(404).json({
+        success: false,
+        message: 'You are not enrolled in this class.'
+      });
+    }
+
+    // 5. Delete the enrollment
+    await enrollment.deleteOne();
+
+    res.status(200).json({
+      success: true,
+      message: 'Successfully unenrolled from class.'
+    });
+
+  } catch (error) {
+    console.error('Unenroll From Class Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to unenroll from class',
+      error: error.message
     });
   }
 };

@@ -9,7 +9,7 @@ import studentUserRoutes from './src/student-app/routes/userRoutes.js';
 import studentClassRoutes from './src/student-app/routes/classRoutes.js';
 import studentAttendanceRoutes from './src/student-app/routes/attendanceRoutes.js';
 import studentQRRoutes from './src/student-app/routes/qrRoutes.js';
-import studentTimeSlotRoutes from './src/student-app/routes/timeSlotRoutes.js';
+import studentScheduleRoutes from './src/student-app/routes/scheduleRoutes.js';
 
 // Import teacher routes
 import teacherAuthRoutes from './src/teacher-website/routes/authRoutes.js';
@@ -47,7 +47,7 @@ app.use('/api/student/users', studentUserRoutes);
 app.use('/api/student/classes', studentClassRoutes);
 app.use('/api/student/attendance', studentAttendanceRoutes);
 app.use('/api/student/qr', studentQRRoutes);
-app.use('/api/student/timeslots', studentTimeSlotRoutes);
+app.use('/api/student/schedules', studentScheduleRoutes);
 
 // Teacher Website Routes
 app.use('/api/teacher/auth', teacherAuthRoutes);

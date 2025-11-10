@@ -1,4 +1,5 @@
 import { QRCodeSession } from '../../models/qrCodeSessionModel.js';
+import { ClassEnrollment } from '../../models/classEnrollmentModel.js';
 
 // Validate QR Code Token
 export const validateQRCode = async (req, res) => {
@@ -63,5 +64,82 @@ export const validateQRCode = async (req, res) => {
   } catch (error) {
     console.error('QR validation error:', error);
     res.status(500).json({ message: error.message });
+  }
+};
+
+/**
+ * @desc    Check if an attendance session is currently active for a specific class
+ * @route   GET /api/qr/session/status/:classId
+ * @access  Private (Student)
+ */
+export const getSessionStatus = async (req, res) => {
+  try {
+    const { classId } = req.params;
+
+    // Find an active session for this class
+    const activeSession = await QRCodeSession.findOne({
+      classId: classId,
+      isActive: true,
+      sessionExpiresAt: { $gt: new Date() }
+    })
+    .select('sessionId classId isActive sessionExpiresAt') // Only send necessary info
+    .lean(); // Use .lean() for faster, read-only query
+
+    if (activeSession) {
+      res.status(200).json({
+        isActive: true,
+        session: activeSession,
+        message: 'An attendance session is currently active.'
+      });
+    } else {
+      res.status(200).json({
+        isActive: false,
+        message: 'No active attendance session found for this class.'
+      });
+    }
+  } catch (error) {
+    console.error('Error checking session status:', error);
+    res.status(500).json({ message: 'Failed to check session status.' });
+  }
+};
+
+/**
+ * @desc    Get all currently active sessions for the student's enrolled classes
+ * @route   GET /api/qr/session/active
+ * @access  Private (Student)
+ */
+export const getActiveSessions = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+
+    // 1. Find all classes the student is enrolled in
+    const enrollments = await ClassEnrollment.find({ studentId }).select('classId').lean();
+    const enrolledClassIds = enrollments.map(e => e.classId);
+
+    if (enrolledClassIds.length === 0) {
+      return res.status(200).json({
+        message: 'Student is not enrolled in any classes.',
+        activeSessions: []
+      });
+    }
+
+    // 2. Find all active sessions for those classes
+    const activeSessions = await QRCodeSession.find({
+      classId: { $in: enrolledClassIds },
+      isActive: true,
+      sessionExpiresAt: { $gt: new Date() }
+    })
+    .populate('classId', 'subjectName subjectCode classNumber') // Populate with class details
+    .select('sessionId classId isActive sessionExpiresAt qrPayload.subjectName qrPayload.classNumber')
+    .lean();
+
+    res.status(200).json({
+      message: `Found ${activeSessions.length} active session(s).`,
+      activeSessions: activeSessions
+    });
+    
+  } catch (error) {
+    console.error('Error fetching active sessions:', error);
+    res.status(500).json({ message: 'Failed to fetch active sessions.' });
   }
 };

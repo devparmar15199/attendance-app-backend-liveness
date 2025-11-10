@@ -2,9 +2,15 @@ import { Attendance } from '../../models/attendanceModel.js';
 import { QRCodeSession } from '../../models/qrCodeSessionModel.js';
 import { ClassEnrollment } from '../../models/classEnrollmentModel.js';
 import { User } from '../../models/userModel.js';
+import { ScheduleInstance } from '../../models/recurringScheduleModel.js';
+import { Class } from '../../models/classModel.js';
 import { compareFaces } from '../../AWS/rekognitionService.js';
 
-// Submit attendance (unified endpoint for student app)
+/**
+ * @desc    Submit a new attendance record after face verification
+ * @route   POST /api/student/attendance
+ * @access  Private (Student)
+ */
 export const submitAttendance = async (req, res) => {
   try {
     const { 
@@ -12,7 +18,7 @@ export const submitAttendance = async (req, res) => {
       classId, 
       studentCoordinates, 
       livenessPassed, 
-      faceImage // Expecting a base64 encoded image string from the app
+      faceImage // Expecting a base64 encoded image string
     } = req.body;
     
     const studentId = req.user.id;
@@ -81,14 +87,15 @@ export const submitAttendance = async (req, res) => {
       classId,
       sessionId: qrSession._id, // Use QRCodeSession's ObjectId instead of sessionId string
       scheduleId: qrSession.scheduleId, // Associate with schedule from QR session
-      status: 'present',
-      location: {
-        type: 'Point',
-        coordinates: [studentCoordinates.longitude, studentCoordinates.latitude],
+      // status: 'present',
+      studentCoordinates: {
+        latitude: studentCoordinates.latitude, 
+        longitude: studentCoordinates.longitude,
       },
-      markedBy: 'student',
+      // markedBy: 'student',
       livenessPassed: true,
-      timestamp: new Date()
+      timestamp: new Date(),
+      manualEntry: false,
     });
 
     await attendanceRecord.save();
@@ -100,12 +107,19 @@ export const submitAttendance = async (req, res) => {
 
   } catch (error) {
     console.error('Error submitting attendance:', error);
+    if (error.message.includes('Face could not be verified')) {
+      return res.status(401).json({ message: error.message });
+    }
     res.status(500).json({ message: error.message || 'An unexpected server error occurred.' });
   }
 };
 
 
-// Sync offline attendance records
+/**
+ * @desc    Sync multiple offline attendance records
+ * @route   POST /api/student/attendance/sync
+ * @access  Private (Student)
+ */
 export const syncAttendance = async (req, res) => {
   try {
     const { attendances } = req.body;
@@ -136,6 +150,7 @@ export const syncAttendance = async (req, res) => {
         faceEmbedding,
         timestamp: new Date(timestamp),
         synced: true,
+        notes: " Synced from offline data",
       });
 
       await newRecord.save();
@@ -150,6 +165,252 @@ export const syncAttendance = async (req, res) => {
   } catch (error) {
     console.error('Sync error:', error);
     res.status(500).json({ message: error.message });
+  }
+};
+
+// --- (NEW) Get Student's Attendance Records (Paginated) ---
+
+/**
+ * @desc    Get all attendance records for the logged-in student, paginated.
+ * @route   GET /api/attendance/records
+ * @access  Private (Student)
+ */
+export const getMyAttendanceRecords = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 20;
+    const skip = (page - 1) * limit;
+
+    const records = await Attendance.find({ studentId })
+      .populate('classId', 'subjectName subjectCode')
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .skip(skip)
+      .lean(); // Use .lean() for faster read-only queries
+
+    const totalRecords = await Attendance.countDocuments({ studentId });
+    const totalPages = Math.ceil(totalRecords / limit);
+
+    res.status(200).json({
+      message: "Records fetched successfully",
+      data: records,
+      pagination: {
+        totalRecords,
+        totalPages,
+        currentPage: page,
+        limit
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching attendance records:', error);
+    res.status(500).json({ message: 'Failed to fetch attendance records.' });
+  }
+};
+
+// --- (NEW) Get Student's Records by Class (Paginated) ---
+
+/**
+ * @desc    Get all attendance records for a specific class, paginated.
+ * @route   GET /api/attendance/records/class/:classId
+ * @access  Private (Student)
+ */
+export const getMyAttendanceRecordsByClass = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const { classId } = req.params;
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 20;
+    const skip = (page - 1) * limit;
+
+    const records = await Attendance.find({ studentId, classId })
+      .populate('classId', 'subjectName subjectCode')
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .skip(skip)
+      .lean();
+
+    const totalRecords = await Attendance.countDocuments({ studentId, classId });
+    const totalPages = Math.ceil(totalRecords / limit);
+
+    res.status(200).json({
+      message: "Class records fetched successfully",
+      data: records,
+      pagination: {
+        totalRecords,
+        totalPages,
+        currentPage: page,
+        limit
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching class attendance records:', error);
+    res.status(500).json({ message: 'Failed to fetch class attendance records.' });
+  }
+};
+
+// --- (NEW) Get Overall Attendance Summary ---
+
+/**
+ * @desc    Get an attendance summary (total/attended/percentage) for all enrolled classes.
+ * @route   GET /api/attendance/summary
+ * @access  Private (Student)
+ */
+export const getMyAttendanceSummary = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+
+    // 1. Find all classes student is enrolled in
+    const enrollments = await ClassEnrollment.find({ studentId }).select('classId');
+    if (enrollments.length === 0) {
+      return res.status(200).json({ message: "Student is not enrolled in any classes." });
+    }
+    const classIds = enrollments.map(e => e.classId);
+
+    // 2. Find total held sessions (Denominator)
+    // A "held" session is one that is in the past and was not 'cancelled'
+    const totalHeldSessions = await ScheduleInstance.countDocuments({
+      classId: { $in: classIds },
+      scheduledDate: { $lte: new Date() }, // In the past or today
+      status: { $ne: 'cancelled' }
+    });
+
+    // 3. Find total attended sessions (Numerator)
+    const totalAttendedSessions = await Attendance.countDocuments({
+      studentId,
+      classId: { $in: classIds }
+    });
+
+    // 4. Calculate percentage
+    const percentage = (totalHeldSessions === 0)
+      ? 100 // If no sessions held, attendance is 100%
+      : (totalAttendedSessions / totalHeldSessions) * 100;
+
+    res.status(200).json({
+      message: "Overall summary fetched successfully",
+      summary: {
+        totalHeldSessions,
+        totalAttendedSessions,
+        totalMissedSessions: totalHeldSessions - totalAttendedSessions,
+        percentage: parseFloat(percentage.toFixed(2))
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching attendance summary:', error);
+    res.status(500).json({ message: 'Failed to fetch attendance summary.' });
+  }
+};
+
+// --- (NEW) Get Single Class Attendance Summary ---
+
+/**
+ * @desc    Get a detailed attendance summary for a single class.
+ * @route   GET /api/attendance/summary/class/:classId
+ * @access  Private (Student)
+ */
+export const getMyClassAttendanceSummary = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const { classId } = req.params;
+
+    // 1. Find total held sessions for this class (Denominator)
+    const totalHeldSessions = await ScheduleInstance.countDocuments({
+      classId: classId,
+      scheduledDate: { $lte: new Date() },
+      status: { $ne: 'cancelled' }
+    });
+
+    // 2. Find total attended sessions for this class (Numerator)
+    const totalAttendedSessions = await Attendance.countDocuments({
+      studentId,
+      classId: classId
+    });
+
+    // 3. Calculate percentage
+    const percentage = (totalHeldSessions === 0)
+      ? 100
+      : (totalAttendedSessions / totalHeldSessions) * 100;
+
+    res.status(200).json({
+      message: "Class summary fetched successfully",
+      summary: {
+        classId,
+        totalHeldSessions,
+        totalAttendedSessions,
+        totalMissedSessions: totalHeldSessions - totalAttendedSessions,
+        percentage: parseFloat(percentage.toFixed(2))
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching class summary:', error);
+    res.status(500).json({ message: 'Failed to fetch class summary.' });
+  }
+};
+
+// --- (NEW) Get Missed Classes ---
+
+/**
+ * @desc    Get a list of all class sessions the student has missed.
+ * @route   GET /api/attendance/missed
+ * @access  Private (Student)
+ */
+export const getMyMissedClasses = async (req, res) => {
+  try {
+    const studentId = req.user.id;
+
+    // 1. Get all classes student is enrolled in
+    const enrollments = await ClassEnrollment.find({ studentId }).select('classId');
+    if (enrollments.length === 0) {
+      return res.status(200).json({ message: "Student is not enrolled in any classes.", data: [] });
+    }
+    const classIds = enrollments.map(e => e.classId);
+
+    // 2. Get all sessions that were held (past, not cancelled)
+    const heldSessions = await ScheduleInstance.find({
+      classId: { $in: classIds },
+      scheduledDate: { $lte: new Date() },
+      status: { $ne: 'cancelled' }
+    })
+      .populate('classId', 'subjectName subjectCode')
+      .select('scheduledDate classId attendanceSessionId')
+      .lean();
+
+    // 3. Get all attendance records for this student
+    // We get the `sessionId` which links to `ScheduleInstance.attendanceSessionId`
+    const attendedRecords = await Attendance.find({ studentId })
+      .select('sessionId')
+      .lean();
+
+    // Create a Set for fast lookup
+    const attendedSessionIds = new Set(
+      attendedRecords.map(rec => rec.sessionId.toString())
+    );
+
+    // 4. Filter held sessions to find the missed ones
+    const missedClasses = heldSessions.filter(session => {
+      // If the session had no QR code generated, it's not "missed" by the student.
+      // Or, if you want to show it, you'd remove this check.
+      // For this logic, we'll assume a "missed" class is one where a session
+      // *was* created, but the student didn't attend.
+      if (!session.attendanceSessionId) {
+        return false;
+      }
+      
+      // Return true (it's "missed") if the session's ID is NOT in the attended set
+      return !attendedSessionIds.has(session.attendanceSessionId.toString());
+    });
+
+    res.status(200).json({
+      message: "Missed classes fetched successfully",
+      count: missedClasses.length,
+      data: missedClasses
+    });
+
+  } catch (error) {
+    console.error('Error fetching missed classes:', error);
+    res.status(500).json({ message: 'Failed to fetch missed classes.' });
   }
 };
 

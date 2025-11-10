@@ -1,5 +1,14 @@
 import express from 'express';
-import { getAllClasses, getClassById, getEnrolledClasses, getAvailableClasses, enrollInClass, getAvailableStudentsForClass, teacherEnrollStudent, teacherBatchEnrollStudents } from '../controllers/classController.js';
+import { 
+    getAllClasses, 
+    getClassById, 
+    getEnrolledClasses, 
+    getAvailableClasses, 
+    enrollInClass, 
+    unenrollFromClass,
+    getAvailableStudentsForClass, 
+    teacherEnrollStudent, 
+    teacherBatchEnrollStudents } from '../controllers/classController.js';
 import { protect } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -8,10 +17,19 @@ const router = express.Router();
 router.get('/', protect, getAllClasses);
 router.get('/enrolled', protect, getEnrolledClasses);
 router.get('/available', protect, getAvailableClasses); // For students to browse available classes
-router.get('/:classId/available-students', protect, getAvailableStudentsForClass); // For teachers to get all available students
+router.get('/:id', protect, getClassById);
 router.post('/:classId/enroll', protect, enrollInClass); // For student self-enrollment
+
+/**
+ * @route   DELETE /api/classes/:classId/unenroll
+ * @desc    Un-enroll the student from a class
+ * @access  Private (Student)
+ */
+router.delete('/:classId/unenroll', protect, unenrollFromClass);
+
+
+router.get('/:classId/available-students', protect, getAvailableStudentsForClass); // For teachers to get all available students
 router.post('/:classId/enroll-student', protect, teacherEnrollStudent); // For teacher single enrollment
 router.post('/:classId/batch-enroll', protect, teacherBatchEnrollStudents); // For teacher batch enrollment
-router.get('/:id', protect, getClassById);
 
 export default router;
