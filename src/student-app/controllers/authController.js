@@ -138,7 +138,7 @@ export const register = async (req, res) => {
           classYear: user.classYear,
           semester: user.semester,
           division: user.division,
-          hasFaceImage: !!faceImageS3Key
+          hasFaceImage: !!user.faceImageS3Key
         }
       });
     } else {
@@ -183,7 +183,7 @@ export const login = async (req, res) => {
           classYear: user.classYear,
           semester: user.semester,
           division: user.division,
-          hasFaceImage: !!faceImageS3Key
+          hasFaceImage: !!user.faceImageS3Key
         }
       });
     } else {
