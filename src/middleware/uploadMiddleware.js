@@ -1,10 +1,3 @@
-/**
- * @file uploadMiddleware.js
- * @description This module configures and provides Express middleware for
- * handling file uploads using `multer`. It is set up to store files in
- * memory (for processing/uploading to S3) and includes robust error handling.
- */
-
 import multer from 'multer';
 
 /**

@@ -52,6 +52,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: function() { return this.role === 'student'; }
   },
+  division: {
+    type: String,
+    required: function() { return this.role === 'student'; }
+  },
   /**
    * The S3 object key for the user's registered face image.
    * This replaces storing a large embedding directly in the database.

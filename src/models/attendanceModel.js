@@ -1,16 +1,5 @@
-/**
- * @file attendanceModel.js
- * @description Defines the Mongoose schema for an Attendance record. This
- * model represents a single student's successful attendance
- * submission for a specific class session.
- */
-
 import mongoose from 'mongoose';
 
-/**
- * @schema attendanceSchema
- * @description Schema definition for the Attendance model.
- */
 const attendanceSchema = new mongoose.Schema({
   /**
    * Reference to the User (Student) this record belongs to.

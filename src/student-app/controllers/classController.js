@@ -15,7 +15,7 @@ export const getAllClasses = async (req, res) => {
       const enrollments = await ClassEnrollment.find({ studentId: userId })
         .populate({
           path: 'classId',
-          select: 'classNumber subjectCode subjectName classYear semester division teacherId'
+          select: 'classNumber subjectCode subjectName classYear semester division teacherId teacherName'
         });
       
       classes = enrollments.map(enrollment => enrollment.classId);
@@ -36,7 +36,8 @@ export const getAllClasses = async (req, res) => {
       classYear: cls.classYear,
       semester: cls.semester,
       division: cls.division,
-      teacherId: cls.teacherId
+      teacherId: cls.teacherId,
+      teacherName: cls.teacherName
     }));
 
     res.json(transformedClasses);
@@ -59,7 +60,7 @@ export const getEnrolledClasses = async (req, res) => {
     const enrollments = await ClassEnrollment.find({ studentId })
       .populate({
         path: 'classId',
-        select: 'classNumber subjectCode subjectName classYear semester division teacherId'
+        select: 'classNumber subjectCode subjectName classYear semester division teacherId teacherName'
       });
 
     const classes = enrollments.map(enrollment => ({
@@ -70,7 +71,8 @@ export const getEnrolledClasses = async (req, res) => {
       classYear: enrollment.classId.classYear,
       semester: enrollment.classId.semester,
       division: enrollment.classId.division,
-      teacherId: enrollment.classId.teacherId
+      teacherId: enrollment.classId.teacherId,
+      teacherName: enrollment.classId.teacherName
     }));
 
     res.json(classes);
@@ -90,37 +92,74 @@ export const getAvailableClasses = async (req, res) => {
       return res.status(403).json({ message: 'This endpoint is only for students' });
     }
 
+    const student = await User.findById(studentId).select('classYear semester division');
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
     // Get all classes
-    const allClasses = await Class.find()
-      .populate('teacherId', 'fullName name email')
-      .select('classNumber subjectCode subjectName classYear semester division teacherId');
+    // const allClasses = await Class.find()
+    //   .populate('teacherId', 'fullName email')
+    //   .select('classNumber subjectCode subjectName classYear semester division teacherId');
 
     // Get student's current enrollments
-    const enrollments = await ClassEnrollment.find({ studentId });
+    const enrollments = await ClassEnrollment.find({ studentId }).select('classId -_id');
     const enrolledClassIds = enrollments.map(e => e.classId.toString());
 
     // Filter out classes the student is already enrolled in
-    const availableClasses = allClasses
-      .filter(cls => !enrolledClassIds.includes(cls._id.toString()))
-      .map(cls => ({
-        _id: cls._id,
-        classNumber: cls.classNumber,
-        subjectCode: cls.subjectCode,
-        subjectName: cls.subjectName,
-        classYear: cls.classYear,
-        semester: cls.semester,
-        division: cls.division,
-        teacher: {
-          _id: cls.teacherId._id,
-          name: cls.teacherId.fullName || cls.teacherId.name,
-          email: cls.teacherId.email
-        }
-      }));
+    // const availableClasses = allClasses
+    //   .filter(cls => !enrolledClassIds.includes(cls._id.toString()))
+    //   .map(cls => ({
+    //     _id: cls._id,
+    //     classNumber: cls.classNumber,
+    //     subjectCode: cls.subjectCode,
+    //     subjectName: cls.subjectName,
+    //     classYear: cls.classYear,
+    //     semester: cls.semester,
+    //     division: cls.division,
+    //     teacher: {
+    //       _id: cls.teacherId._id,
+    //       fullName: cls.teacherId.fullName || cls.teacherName,
+    //       email: cls.teacherId.email
+    //     }
+    //   }));
+
+    const availableClasses = await Class.find({
+      classYear: student.classYear,
+      semester: student.semester,
+      division: student.division,
+      _id: { $nin: enrolledClassIds }
+    }).select('classNumber subjectCode subjectName classYear semester division teacherId teacherName');
+
+    if (!availableClasses || availableClasses.length === 0) {
+        return res.json({
+            success: true,
+            data: [],
+            total: 0
+        });
+    }
+
+    const classIds = availableClasses.map(cls => cls._id);
+
+    const populatedClasses = availableClasses.map(cls => ({
+      _id: cls._id,
+      classNumber: cls.classNumber,
+      subjectCode: cls.subjectCode,
+      subjectName: cls.subjectName,
+      classYear: cls.classYear,
+      semester: cls.semester,
+      division: cls.division,
+      teacher: {
+        _id: cls.teacherId,
+        fullName: cls.teacherName,
+        email: ''
+      }
+    }));
 
     res.json({
       success: true,
-      data: availableClasses,
-      total: availableClasses.length
+      data: populatedClasses,
+      total: populatedClasses.length
     });
 
   } catch (error) {

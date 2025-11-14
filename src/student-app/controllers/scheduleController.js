@@ -1,5 +1,7 @@
 import { ScheduleInstance } from '../../models/recurringScheduleModel.js';
+import { RecurringSchedule } from '../../models/recurringScheduleModel.js';
 import { ClassEnrollment } from '../../models/classEnrollmentModel.js';
+import { Schedule } from '../../models/scheduleModel.js';
 import { Class } from '../../models/classModel.js';
 import { User } from '../../models/userModel.js';
 
@@ -49,14 +51,14 @@ const getStudentScheduleForDateRange = async (studentId, startDate, endDate) => 
     }
 
     // 2. Find all schedule instances for those classes within the date range
-    const schedule = await ScheduleInstance.find({
+    const schedule = await Schedule.find({
         classId: { $in: enrolledClassIds },
-        scheduledDate: { $gte: startDate, $lte: endDate },
-        status: { $ne: 'cancelled' } // Don't show cancelled classes
+        // scheduledDate: { $gte: startDate, $lte: endDate },
+        // status: { $ne: 'cancelled' }
     })
     .populate('classId', 'subjectName subjectCode roomNumber') // Get class info
     .populate('teacherId', 'fullName email') // Get teacher info
-    .sort({ scheduledDate: 1, startTime: 1 }) // Sort by date, then by time
+    // .sort({ scheduledDate: 1, startTime: 1 }) 
     .lean(); // Use .lean() for fast, read-only operations
 
     return schedule;

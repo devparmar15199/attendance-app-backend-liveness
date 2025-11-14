@@ -70,6 +70,7 @@ export const getAllStudents = async (req, res) => {
       search, 
       classYear, 
       semester,
+      division,
       sortBy = 'createdAt',
       sortOrder = 'desc'
     } = req.query;
@@ -93,6 +94,10 @@ export const getAllStudents = async (req, res) => {
     // Add semester filter
     if (semester) {
       query.semester = semester;
+    }
+
+    if (division) {
+      query.division = division;
     }
 
     const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
@@ -197,11 +202,12 @@ export const createStudent = async (req, res) => {
       password, 
       enrollmentNo, 
       classYear, 
-      semester 
+      semester,
+      division
     } = req.body;
 
     // Validation
-    if (!fullName || !email || !password || !enrollmentNo || !classYear || !semester) {
+    if (!fullName || !email || !password || !enrollmentNo || !classYear || !semester || !division) {
       return res.status(400).json({ 
         success: false, 
         message: 'All fields are required' 
@@ -243,6 +249,7 @@ export const createStudent = async (req, res) => {
       enrollmentNo,
       classYear,
       semester,
+      division,
       role: 'student',
       faceImageS3Key
     });
@@ -257,6 +264,7 @@ export const createStudent = async (req, res) => {
         enrollmentNo: student.enrollmentNo,
         classYear: student.classYear,
         semester: student.semester,
+        division: student.division,
         faceImageS3Key: student.faceImageS3Key
       }
     });
@@ -280,6 +288,7 @@ export const updateStudent = async (req, res) => {
       enrollmentNo, 
       classYear, 
       semester,
+      division,
       password
     } = req.body;
 
@@ -319,6 +328,7 @@ export const updateStudent = async (req, res) => {
     if (fullName) student.fullName = fullName;
     if (classYear) student.classYear = classYear;
     if (semester) student.semester = semester;
+    if (division) student.division = division;
     if (password) student.password = password; // Will be hashed by pre-save hook
 
     // Handle face image upload if provided
@@ -341,6 +351,7 @@ export const updateStudent = async (req, res) => {
         enrollmentNo: student.enrollmentNo,
         classYear: student.classYear,
         semester: student.semester,
+        division: student.division,
         faceImageS3Key: student.faceImageS3Key
       }
     });

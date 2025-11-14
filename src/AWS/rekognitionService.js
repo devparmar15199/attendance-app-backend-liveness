@@ -1,33 +1,11 @@
-/**
- * @file rekognitionService.js
- * @description This module handles face comparison using AWS Rekognition.
- * It provides a function to compare a newly captured face (target) against
- * a registered face (source) stored in S3.
- */
-
 import { RekognitionClient, CompareFacesCommand } from '@aws-sdk/client-rekognition';
 
-/**
- * @const {RekognitionClient} rekognitionClient
- * @description An instance of the AWS Rekognition client.
- * It automatically uses credentials from process.env.
- */
 const rekognitionClient = new RekognitionClient({
   region: process.env.AWS_REGION,
 });
 
-/**
- * @const {string} S3_BUCKET_NAME
- * @description The S3 bucket where source/reference face images are stored.
- * This MUST match the bucket used in s3Service.js.
- */
 const S3_BUCKET_NAME = 'qr-attendance-student-faces-18102025';
 
-/**
- * @const {number} SIMILARITY_THRESHOLD
- * @description The minimum confidence level (in percent) required for
- * Rekognition to consider two faces a match.
- */
 const SIMILARITY_THRESHOLD = 98; // Faces must be at least 98% similar to be a match
 
 /**

@@ -6,7 +6,6 @@ import {
     getMyAttendanceRecordsByClass,
     getMyAttendanceSummary,
     getMyClassAttendanceSummary,
-    getMyMissedClasses
 } from '../controllers/attendanceController.js';
 
 import { protect } from '../../middleware/authMiddleware.js';
@@ -64,6 +63,6 @@ router.get('/summary/class/:classId', protect, getMyClassAttendanceSummary);
  * @desc    Get a list of all classes the student has missed
  * @access  Private (Student)
  */
-router.get('/missed', protect, getMyMissedClasses);
+// router.get('/missed', protect, getMyMissedClasses);
 
 export default router;

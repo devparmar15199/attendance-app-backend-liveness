@@ -1,11 +1,5 @@
-/**
- * @file s3Service.js
- * @description This module handles all interactions with Amazon S3 for file storage.
- * It provides a centralized way to get an S3 client and upload files,
- * specifically for storing student face images required for attendance.
- */
-
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+        
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 
 // Lazy initialize S3 client to ensure environment variables are loaded
 let s3Client = null;
@@ -87,6 +81,21 @@ const uploadFaceImage = async (imageBuffer, filename, contentType = 'image/jpeg'
   }
 };
 
+const deleteFaceImage = async (S3Key) => {
+  try {
+    const client = getS3Client();
+    const command = new DeleteObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: S3Key
+    });
+    await client.send(command);
+    console.log(`Successfully deleted object from S3: ${S3Key}`);
+  } catch (error) {
+    error('Error deleting object from S3:', error);
+    throw new Error(`Failed to delete object from S3: ${error.message}`);
+  }
+}
+
 /**
  * Generate a unique filename for face images.
  * This helps in creating a standardized and collision-resistant filename.
@@ -102,6 +111,7 @@ const generateFaceImageFilename = (userId, extension = 'jpg') => {
 
 export {
   uploadFaceImage,
+  deleteFaceImage,
   generateFaceImageFilename,
   BUCKET_NAME
 };

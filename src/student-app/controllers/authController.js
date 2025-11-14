@@ -2,7 +2,6 @@ import { User } from '../../models/userModel.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { uploadFaceImage, generateFaceImageFilename } from '../../AWS/s3Service.js';
-import { createSimpleFaceEmbedding } from '../../AWS/faceEmbeddingService.js';
 
 // Generate JWT Token
 const generateToken = (id) => {
@@ -15,93 +14,80 @@ export const register = async (req, res) => {
   console.log('Files received:', req.files);
   
   try {
-    const { name, fullName, email, password, enrollmentNo, role, classYear, semester } = req.body;
-    console.log('Extracted data:', { name, fullName, email, enrollmentNo, role, classYear, semester });
+    const { fullName, email, password, enrollmentNo, classYear, semester, division } = req.body;
 
-    // Use fullName if provided, otherwise use name, and ensure we have at least one
-    const userName = fullName || name;
-    if (!userName || !email || !password) {
-      return res.status(400).json({ 
-        message: 'Name/fullName, email, and password are required' 
+    // --- Student-Specific Validation ---
+    if (!fullName || !email || !password) {
+      return res.status(400).json({
+        message: 'Full name, email, and password are required'
       });
     }
-
-    // Validate student-specific fields
-    if (role === 'student') {
-      if (!enrollmentNo) {
-        return res.status(400).json({ 
-          message: 'Enrollment number is required for students',
-          error: 'ENROLLMENT_REQUIRED'
-        });
-      }
-      if (!classYear) {
-        return res.status(400).json({ 
-          message: 'Class year is required for students',
-          error: 'CLASS_YEAR_REQUIRED'
-        });
-      }
-      if (!semester) {
-        return res.status(400).json({ 
-          message: 'Semester is required for students',
-          error: 'SEMESTER_REQUIRED'
-        });
-      }
+    if (!enrollmentNo) {
+      return res.status(400).json({
+        message: 'Enrollment number is required for students',
+        error: 'ENROLLMENT_REQUIRED'
+      });
+    }
+    if (!classYear) {
+      return res.status(400).json({
+        message: 'Class year is required for students',
+        error: 'CLASS_YEAR_REQUIRED'
+      });
+    }
+    if (!semester) {
+      return res.status(400).json({
+        message: 'Semester is required for students',
+        error: 'SEMESTER_REQUIRED'
+      });
+    }
+    // --- ADDED division validation ---
+    if (!division) {
+      return res.status(400).json({
+        message: 'Division is required for students',
+        error: 'DIVISION_REQUIRED'
+      });
     }
 
     // Check if user exists by email
     const userExists = await User.findOne({ email });
     if (userExists) {
-      console.log('User already exists with email:', email);
-      return res.status(409).json({ 
+      return res.status(409).json({
         message: 'An account with this email already exists. Please use a different email or try logging in.',
         error: 'EMAIL_EXISTS',
         suggestion: 'Try logging in instead or use a different email address'
       });
     }
 
-    // Check if enrollment number already exists (for students)
-    if (enrollmentNo) {
-      const enrollmentExists = await User.findOne({ enrollmentNo });
-      if (enrollmentExists) {
-        console.log('Enrollment number already exists:', enrollmentNo);
-        return res.status(409).json({ 
-          message: 'This enrollment number is already registered. Please check your enrollment number or contact support.',
-          error: 'ENROLLMENT_EXISTS',
-          suggestion: 'Verify your enrollment number or try logging in if you already have an account'
-        });
-      }
+    // Check if enrollment number already exists
+    const enrollmentExists = await User.findOne({ enrollmentNo });
+    if (enrollmentExists) {
+      return res.status(409).json({
+        message: 'This enrollment number is already registered. Please check your enrollment number or contact support.',
+        error: 'ENROLLMENT_EXISTS',
+        suggestion: 'Verify your enrollment number or try logging in if you already have an account'
+      });
     }
-
-    console.log('Creating new user...');
-    console.log('Password received for registration:', password);
-    console.log('Password length:', password ? password.length : 'undefined');
-    console.log('NOTE: Letting User model pre-save hook handle password hashing to avoid double-hashing');
 
     // Create user data - pass plain password, let pre-save hook handle hashing
     const userData = {
-      name: userName,
-      fullName: userName,
+      fullName,
       email,
-      password: password, // Pass plain password - pre-save hook will hash it
-      role: role || 'student'
+      password: password, // Pre-save hook will hash this
+      role: 'student', // --- CHANGED: Hardcoded to 'student'
+      enrollmentNo,
+      classYear,
+      semester,
+      division // --- ADDED: Division is now saved
     };
-
-    // Add student-specific fields only for students
-    if (role === 'student') {
-      userData.enrollmentNo = enrollmentNo;
-      userData.classYear = classYear;
-      userData.semester = semester;
-    }
 
     // Handle face image upload if provided
     let faceImageS3Key = null;
-    let faceEmbedding = [];
 
     if (req.files && req.files.faceImage) {
       try {
         console.log('Processing face image upload...');
         const faceImageFile = req.files.faceImage[0];
-        const filename = generateFaceImageFilename(userName);
+        const filename = generateFaceImageFilename(fullName);
         
         // Upload to S3
         faceImageS3Key = await uploadFaceImage(
@@ -110,14 +96,7 @@ export const register = async (req, res) => {
           faceImageFile.mimetype
         );
         
-        // Create face embedding
-        faceEmbedding = await createSimpleFaceEmbedding(faceImageFile.buffer);
-        
-        console.log('Face image uploaded to S3:', faceImageS3Key);
-        console.log('Face embedding created, length:', faceEmbedding.length);
-        
         userData.faceImageS3Key = faceImageS3Key;
-        userData.faceEmbedding = faceEmbedding;
       } catch (faceError) {
         console.error('Error processing face image:', faceError);
         // Continue with registration even if face processing fails
@@ -125,35 +104,22 @@ export const register = async (req, res) => {
       }
     } else if (req.body.faceImageBase64) {
       try {
-        console.log('Processing base64 face image...');
-        console.log('Base64 image size:', req.body.faceImageBase64.length);
         // Handle base64 image from mobile app
         const base64Data = req.body.faceImageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
         const imageBuffer = Buffer.from(base64Data, 'base64');
-        console.log('Image buffer size:', imageBuffer.length);
-        const filename = generateFaceImageFilename(userName);
-        console.log('Generated filename:', filename);
+        const filename = generateFaceImageFilename(fullName);
         
         // Upload to S3
         console.log('Attempting S3 upload...');
         faceImageS3Key = await uploadFaceImage(imageBuffer, filename, 'image/jpeg');
         
-        // Create face embedding
-        faceEmbedding = await createSimpleFaceEmbedding(imageBuffer);
-        
-        console.log('Face image uploaded to S3:', faceImageS3Key);
-        console.log('Face embedding created, length:', faceEmbedding.length);
-        
         userData.faceImageS3Key = faceImageS3Key;
-        userData.faceEmbedding = faceEmbedding;
       } catch (faceError) {
         console.error('Error processing base64 face image:', faceError);
         // Continue with registration even if face processing fails
         console.log('Continuing registration without face data...');
       }
     }
-
-    console.log('Creating user with data:', { ...userData, password: '[HIDDEN]', faceEmbedding: '[HIDDEN]' });
 
     // Create user
     const user = await User.create(userData);
@@ -171,6 +137,7 @@ export const register = async (req, res) => {
           enrollmentNo: user.enrollmentNo,
           classYear: user.classYear,
           semester: user.semester,
+          division: user.division,
           hasFaceImage: !!faceImageS3Key
         }
       });
@@ -200,29 +167,10 @@ export const login = async (req, res) => {
       return res.status(400).json({ message: 'Email or enrollment number is required' });
     }
 
-    console.log('Searching for user with query:', query);
-
     // Find user
     const user = await User.findOne(query);
-    console.log('User found:', !!user, user ? { id: user._id, email: user.email, enrollmentNo: user.enrollmentNo, role: user.role } : 'No user found');
 
-    if (user) {
-      console.log('User found, comparing password...');
-      console.log('Provided password:', password);
-      console.log('Stored password hash starts with:', user.password.substring(0, 10));
-      const passwordMatch = await bcrypt.compare(password, user.password);
-      console.log('Password comparison result:', passwordMatch);
-      
-      if (passwordMatch) {
-        console.log('Password comparison successful');
-      } else {
-        console.log('Password mismatch - login failed');
-      }
-    } else {
-      console.log('User not found');
-    }
-
-    if (user && (await bcrypt.compare(password, user.password))) {
+    if (user && (await user.matchPassword(password))) {
       console.log('Login successful for user:', user.enrollmentNo || user.email);
       res.json({
         token: generateToken(user._id),
@@ -231,7 +179,11 @@ export const login = async (req, res) => {
           fullName: user.fullName || user.name,
           email: user.email,
           role: user.role,
-          enrollmentNo: user.enrollmentNo
+          enrollmentNo: user.enrollmentNo,
+          classYear: user.classYear,
+          semester: user.semester,
+          division: user.division,
+          hasFaceImage: !!faceImageS3Key
         }
       });
     } else {

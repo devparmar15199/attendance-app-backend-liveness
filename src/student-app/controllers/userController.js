@@ -2,6 +2,7 @@ import { User } from '../../models/userModel.js';
 import bcrypt from 'bcryptjs';
 import { 
   uploadFaceImage as uploadToS3,
+  deleteFaceImage as deleteFromS3,
   generateFaceImageFilename
 } from '../../AWS/s3Service.js';
 
@@ -22,6 +23,7 @@ export const getProfile = async (req, res) => {
       enrollmentNo: user.enrollmentNo,
       classYear: user.classYear,
       semester: user.semester,
+      division: user.division,
       hasFaceImage: !!user.faceImageS3Key,
       createdAt: user.createdAt
     });
@@ -33,7 +35,7 @@ export const getProfile = async (req, res) => {
 // Update User Profile
 export const updateProfile = async (req, res) => {
   try {
-    const { fullName, email } = req.body;
+    const { fullName, email, classYear, semester, division } = req.body;
     const user = await User.findById(req.user.id);
 
     if (!user) {
@@ -52,6 +54,17 @@ export const updateProfile = async (req, res) => {
       }
       user.email = email;
     }
+    if (user.role === 'student') {
+      if (classYear) {
+        user.classYear = classYear;
+      }
+      if (semester) {
+        user.semester = semester;
+      }
+      if (division) {
+        user.division = division;
+      }
+    }
 
     const updatedUser = await user.save();
 
@@ -61,6 +74,9 @@ export const updateProfile = async (req, res) => {
       email: updatedUser.email,
       role: updatedUser.role,
       enrollmentNo: updatedUser.enrollmentNo,
+      classYear: updatedUser.classYear,
+      semester: updatedUser.semester,
+      division: updatedUser.division
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -133,8 +149,16 @@ export const updateFaceImage = async (req, res) => {
         console.warn(`Orphaned S3 key: ${user.faceImageS3Key}. Consider implementing S3 delete logic.`);
     }
 
+    const oldKey = user.faceImageS3Key;
+
     user.faceImageS3Key = newS3Key;
     await user.save();
+
+    if (oldKey) {
+      // Delete the old face image from S3
+      console.log(`Deleting old face image from S3: ${oldKey}`);
+      await deleteFromS3(oldKey);
+    }
 
     res.status(200).json({
       message: 'Face image updated successfully.',

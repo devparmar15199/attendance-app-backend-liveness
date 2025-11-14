@@ -269,10 +269,10 @@ export const getMyAttendanceSummary = async (req, res) => {
 
     // 2. Find total held sessions (Denominator)
     // A "held" session is one that is in the past and was not 'cancelled'
-    const totalHeldSessions = await ScheduleInstance.countDocuments({
+    const totalHeldSessions = await Attendance.countDocuments({
       classId: { $in: classIds },
-      scheduledDate: { $lte: new Date() }, // In the past or today
-      status: { $ne: 'cancelled' }
+      // scheduledDate: { $lte: new Date() }, // In the past or today
+      // status: { $ne: 'cancelled' }
     });
 
     // 3. Find total attended sessions (Numerator)

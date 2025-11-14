@@ -1,19 +1,6 @@
-/**
- * @file faceEmbeddingService.js
- * @description This module is responsible for creating face embeddings
- * using AWS Rekognition's IndexFaces API. It adds faces to a Rekognition
- * "collection" which allows for 1:N (one-to-many) face searching.
- * A fallback "simple" embedding generator is also included.
- */
-
 import { RekognitionClient, IndexFacesCommand } from '@aws-sdk/client-rekognition';
 import crypto from 'crypto';
 
-/**
- * @const {RekognitionClient} rekognitionClient
- * @description An instance of the AWS Rekognition client, configured with
- * explicit credentials from environment variables.
- */
 const rekognitionClient = new RekognitionClient({
     region: process.env.AWS_REGION || 'us-east-1',
     credentials: {

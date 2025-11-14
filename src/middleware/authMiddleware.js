@@ -1,10 +1,3 @@
-/**
- * @file authMiddleware.js
- * @description This module provides Express middleware for handling authentication
- * and authorization. It includes functions to protect routes, requiring a valid
- * JSON Web Token (JWT), and to restrict access based on user roles (admin, teacher).
- */
-
 import jwt from 'jsonwebtoken';
 import { User } from '../models/userModel.js'; // Assuming User model is imported correctly
 
