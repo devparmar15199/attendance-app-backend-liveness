@@ -8,8 +8,8 @@ import { BUCKET_NAME } from './s3Service.js';
 // Configuration
 const CONFIG = {
   REGION: process.env.AWS_REGION || 'ap-south-1',
-  SIMILARITY_THRESHOLD: 90,
-  MIN_CONFIDENCE: 90
+  SIMILARITY_THRESHOLD: 80,
+  MIN_CONFIDENCE: 70
 };
 
 // Lazy Singleton Client
@@ -70,7 +70,7 @@ export const detectFaceWithAttributes = async (imageBytes) => {
     }
 
     // Quality Check (Fail fast)
-    if ((face.Quality?.Brightness || 0) < 30) {
+    if ((face.Quality?.Brightness || 0) < 15) {
       return {
         success: false,
         reason: 'TOO_DARK',
@@ -78,7 +78,7 @@ export const detectFaceWithAttributes = async (imageBytes) => {
       };
     }
 
-    if ((face.Quality?.Sharpness || 0) < 30) {
+    if ((face.Quality?.Sharpness || 0) < 15) {
       return {
         success: false,
         reason: 'BLURRY',
@@ -89,8 +89,8 @@ export const detectFaceWithAttributes = async (imageBytes) => {
     return {
       success: true,
       livenessIndicators: {
-        eyesOpen: face.EyesOpen?.Value === true && face.EyesOpen?.Confidence > 80,
-        smile: face.Smile?.Value === true && face.Smile?.Confidence > 80,
+        eyesOpen: face.EyesOpen?.Value === true && face.EyesOpen?.Confidence > 50,
+        smile: face.Smile?.Value === true && face.Smile?.Confidence > 40,
         pose: {
           pitch: face.Pose?.Pitch || 0,  // Up/Down
           yaw: face.Pose?.Yaw || 0       // Left/Right
@@ -116,13 +116,36 @@ export const validateLivenessChallenge = async (imageBytes, challengeType) => {
 
   // Logic Mapping
   const checks = {
-    eyes_open: { check: eyesOpen, pass: 'Eyes open', fail: 'Open eyes wider' },
-    // smile: { check: smile && face.Smile?.Confidence > 50, pass: 'Smile detected', fail: 'Smile not detected' },
-    smile: { check: smile, pass: 'Smile detected', fail: 'Smile not detected' },
-    turn_left: { check: pose.yaw < -45, pass: 'Head turned left', fail: 'Turn head left' },
-    turn_right: { check: pose.yaw > 15, pass: 'Head turned right', fail: 'Turn head right' },
-    look_up: { check: pose.pitch > 10, pass: 'Looking up', fail: 'Look up' },
-    neutral: { check: Math.abs(pose.yaw) < 10 && Math.abs(pose.pitch) < 10, pass: 'Neutral face', fail: 'Look straight ahead' }
+    eyes_open: { 
+      check: eyesOpen, 
+      pass: 'Eyes open', 
+      fail: 'Open eyes wider' 
+    },
+    smile: { 
+      check: smile, 
+      pass: 'Smile detected', 
+      fail: 'Smile not detected' 
+    },
+    turn_left: { 
+      check: pose.yaw < -20, 
+      pass: 'Head turned left', 
+      fail: 'Turn head left' 
+    },
+    turn_right: { 
+      check: pose.yaw > 20, 
+      pass: 'Head turned right', 
+      fail: 'Turn head right' 
+    },
+    look_up: { 
+      check: pose.pitch > 5, 
+      pass: 'Looking up', 
+      fail: 'Look up' 
+    },
+    neutral: { 
+      check: Math.abs(pose.yaw) < 20 && Math.abs(pose.pitch) < 20, 
+      pass: 'Neutral face', 
+      fail: 'Look straight ahead' 
+    }
   };
 
   const criteria = checks[challengeType] || checks['neutral'];
