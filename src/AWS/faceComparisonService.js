@@ -117,7 +117,8 @@ export const validateLivenessChallenge = async (imageBytes, challengeType) => {
   // Logic Mapping
   const checks = {
     eyes_open: { check: eyesOpen, pass: 'Eyes open', fail: 'Open eyes wider' },
-    smile: { check: smile && face.Smile?.Confidence > 50, pass: 'Smile detected', fail: 'Smile not detected' },
+    // smile: { check: smile && face.Smile?.Confidence > 50, pass: 'Smile detected', fail: 'Smile not detected' },
+    smile: { check: smile, pass: 'Smile detected', fail: 'Smile not detected' },
     turn_left: { check: pose.yaw < -45, pass: 'Head turned left', fail: 'Turn head left' },
     turn_right: { check: pose.yaw > 15, pass: 'Head turned right', fail: 'Turn head right' },
     look_up: { check: pose.pitch > 10, pass: 'Looking up', fail: 'Look up' },
