@@ -216,7 +216,8 @@ export const getClassById = async (req, res) => {
       classYear: classRecord.classYear,
       semester: classRecord.semester,
       division: classRecord.division,
-      teacherId: classRecord.teacherId
+      teacherId: classRecord.teacherId,
+      teacherName: classRecord.teacherName
     });
 
   } catch (error) {
