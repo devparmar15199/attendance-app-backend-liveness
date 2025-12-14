@@ -4,13 +4,6 @@ import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client
 // Lazy initialize S3 client to ensure environment variables are loaded
 let s3Client = null;
 
-/**
- * Gets a singleton instance of the S3Client.
- * It initializes the client on first call, ensuring AWS credentials
- * are loaded from environment variables.
- * @returns {S3Client} The initialized S3 Client instance.
- * @throws {Error} If AWS credentials (AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY) are not set.
- */
 const getS3Client = () => {
   if (!s3Client) {
     // Debug environment variables
@@ -42,16 +35,6 @@ const getS3Client = () => {
  */
 const BUCKET_NAME = 'qr-attendance-student-faces-18102025';
 
-/**
- * Upload face image to S3.
- * Creates a unique key, sets metadata, and uploads the image buffer.
- *
- * @param {Buffer} imageBuffer - The image buffer (e.g., from a file upload or mobile camera).
- * @param {string} filename - The original or desired filename for the S3 object.
- * @param {string} [contentType='image/jpeg'] - The content type of the image.
- * @returns {Promise<string>} The full S3 key (path) of the uploaded image.
- * @throws {Error} If the upload to S3 fails.
- */
 const uploadFaceImage = async (imageBuffer, filename, contentType = 'image/jpeg') => {
   try {
     const client = getS3Client();
@@ -96,14 +79,6 @@ const deleteFaceImage = async (S3Key) => {
   }
 }
 
-/**
- * Generate a unique filename for face images.
- * This helps in creating a standardized and collision-resistant filename.
- *
- * @param {string} userId - The unique ID of the user (e.g., student ID).
- * @param {string} [extension='jpg'] - File extension (default: jpg).
- * @returns {string} A formatted, unique filename.
- */
 const generateFaceImageFilename = (userId, extension = 'jpg') => {
   const timestamp = Date.now();
   return `user-${userId}-face-${timestamp}.${extension}`;
@@ -113,5 +88,6 @@ export {
   uploadFaceImage,
   deleteFaceImage,
   generateFaceImageFilename,
-  BUCKET_NAME
+  BUCKET_NAME,
+  getS3Client
 };

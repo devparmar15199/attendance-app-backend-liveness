@@ -4,113 +4,215 @@ import { ClassEnrollment } from '../../models/classEnrollmentModel.js';
 import { User } from '../../models/userModel.js';
 import { ScheduleInstance } from '../../models/recurringScheduleModel.js';
 import { Class } from '../../models/classModel.js';
-import { compareFaces } from '../../AWS/rekognitionService.js';
+import { 
+  createLivenessSession,
+  verifyLivenessAndCompare,
+  getLivenessSessionResults
+} from '../../AWS/faceLivenessService.js';
+import {
+  verifyLivenessWithChallenges,
+  compareFaceWithProfile,
+  validateLivenessChallenge
+} from '../../AWS/faceComparisonService.js';
 
 /**
- * @desc    Submit a new attendance record after face verification
- * @route   POST /api/student/attendance
+ * @desc    Start a face liveness session (Step 1)
+ * @route   GET /api/student/attendance/liveness/init
  * @access  Private (Student)
  */
+export const startAttendanceSession = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Create AWS Liveness session
+    const sessionId = await createLivenessSession(userId);
+
+    console.log(`✅ [Liveness] Session created for user ${userId}: ${sessionId}`);
+    
+    res.status(200).json({ 
+      success: true,
+      sessionId,
+      message: 'Liveness session created. Proceed with face scan.'
+    });
+  } catch (error) {
+    console.error('❌ [Liveness] Failed to create session:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to start face verification session.',
+      error: error.message 
+    });
+  }
+};
+
+/**
+ * @desc    Submit attendance after frontend completes liveness check (Step 2)
+ * @route   POST /api/student/attendance
+ * @access  Private (Student)
+ * 
+ * Expected Body:
+ * {
+ *   "sessionId": "abc123-liveness-session-id",  // From AWS Liveness
+ *   "classId": "64f1a2b3c4d5e6f7g8h9i0j1",
+ *   "studentCoordinates": { "latitude": 18.123, "longitude": 73.456 }
+ * }
+ */
 export const submitAttendance = async (req, res) => {
+  console.log('🔄 [Attendance] Starting attendance submission');
   try {
     const { 
       sessionId, 
       classId, 
-      studentCoordinates, 
-      livenessPassed, 
-      faceImage // Expecting a base64 encoded image string
+      studentCoordinates
     } = req.body;
     
     const studentId = req.user.id;
 
-    console.log('New attendance submission request:', { 
-      sessionId, 
-      classId, 
-      studentId,
-      livenessPassed
-    });
-
-    // --- 1. Basic Validation ---
-    if (!sessionId || !classId || !studentCoordinates || !faceImage) {
-      return res.status(400).json({ message: 'Missing required attendance data.' });
+    // --- 1. Input Validation ---
+    if (!sessionId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Liveness session ID is required.' 
+      });
     }
-    if (livenessPassed !== true) {
-      return res.status(400).json({ message: 'Liveness check was not passed.' });
+    if (!classId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Class ID is required.' 
+      });
+    }
+    if (!studentCoordinates?.latitude || !studentCoordinates?.longitude) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Student coordinates are required.' 
+      });
     }
 
-    // --- 2. Find Student and their Reference Face Image Key ---
-    const student = await User.findById(studentId);
-    if (!student || !student.faceImageS3Key) {
-      return res.status(404).json({ message: 'Student profile not found or face is not registered.' });
-    }
-
-    // --- 3. Perform Face Recognition via AWS Rekognition ---
-    // Convert the base64 image string from the app into a Buffer for the AWS SDK
-    const base64Data = faceImage.replace(/^data:image\/\w+;base64,/, '');
-    const targetImageBuffer = Buffer.from(base64Data, 'base64');
+    // --- 2. Verify QR Session is Active ---
+    console.log('🔍 [Attendance] Verifying QR session for class:', classId);
     
-    // Check image size (AWS Rekognition has limits)
-    const imageSizeInMB = targetImageBuffer.length / (1024 * 1024);
-    console.log(`Image size: ${imageSizeInMB.toFixed(2)}MB`);
-    
-    if (imageSizeInMB > 5) {
-      return res.status(400).json({ message: 'Image too large. Please try again with a smaller image.' });
-    }
-    
-    const facesDoMatch = await compareFaces(student.faceImageS3Key, targetImageBuffer);
-
-    if (!facesDoMatch) {
-      return res.status(401).json({ message: 'Face recognition failed. Identity could not be verified.' });
-    }
-    console.log(`✅ Face successfully verified for student: ${student.fullName}`);
-
-    // --- 4. Verify QR Session and Prevent Duplicates ---
     const qrSession = await QRCodeSession.findOne({
-      sessionId,
       classId,
       isActive: true,
       sessionExpiresAt: { $gt: new Date() }
     });
 
     if (!qrSession) {
-      return res.status(400).json({ message: 'This QR code is invalid or has expired.' });
+      console.log('❌ [Attendance] No active QR session found');
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No active attendance session. QR code may have expired.' 
+      });
+    }
+    console.log('✅ [Attendance] QR session verified:', qrSession.sessionId);
+    
+    // --- 3. Check for Duplicate Attendance ---
+    const existingAttendance = await Attendance.findOne({ 
+      studentId, 
+      sessionId: qrSession._id 
+    });
+    
+    if (existingAttendance) {
+      console.log('⚠️ [Attendance] Duplicate attempt detected');
+      return res.status(409).json({ 
+        success: false, 
+        message: 'Attendance already marked for this session.' 
+      });
+    }
+    console.log('✅ [Attendance] No duplicate found');
+
+    // --- 4. Get Student Profile with Face Image ---
+    const student = await User.findById(studentId);
+    
+    if (!student) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Student not found.' 
+      });
     }
     
-    const existingAttendance = await Attendance.findOne({ studentId, sessionId: qrSession._id });
-    if (existingAttendance) {
-      return res.status(409).json({ message: 'You have already marked attendance for this session.' });
+    if (!student.faceImageS3Key) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No profile photo registered. Please upload your face photo first.' 
+      });
+    }
+    console.log(`👤 [Attendance] Student found: ${student.fullName}`);
+    
+    // --- 5. 🔐 VERIFY LIVENESS & FACE MATCH ---
+    console.log(`🤖 [Attendance] Verifying liveness session: ${sessionId}`);
+    console.log(`🖼️ [Attendance] Comparing with stored image: ${student.faceImageS3Key}`);
+    
+    const verificationResult = await verifyLivenessAndCompare(
+      sessionId, 
+      student.faceImageS3Key
+    );
+
+    // Handle verification failure
+    if (!verificationResult.success) {
+      console.log(`❌ [Attendance] Verification failed: ${verificationResult.reason}`);
+      
+      // Return appropriate error based on failure reason
+      const errorMessages = {
+        'LIVENESS_NOT_COMPLETED': 'Please complete the face scan properly.',
+        'LOW_CONFIDENCE': 'Liveness check failed. Ensure good lighting and try again.',
+        'NO_REFERENCE_IMAGE': 'Face scan did not capture properly. Please retry.',
+        'FACE_NOT_MATCHED': 'Face does not match your registered profile.',
+        'INVALID_SESSION': 'Session expired. Please scan QR code again.',
+        'PROFILE_IMAGE_NOT_FOUND': 'Profile image not found. Please re-upload your photo.'
+      };
+
+      return res.status(400).json({ 
+        success: false,
+        reason: verificationResult.reason,
+        message: errorMessages[verificationResult.reason] || verificationResult.message
+      });
     }
 
-    // --- 5. Save the Attendance Record ---
+    console.log(`✅ [Attendance] Identity Verified!`);
+    console.log(`   Liveness Confidence: ${verificationResult.livenessConfidence}%`);
+    console.log(`   Face Similarity: ${verificationResult.similarity}%`);
+
+    // --- 6. Save Attendance Record ---
+    console.log('💾 [Attendance] Saving attendance record');
+    
     const attendanceRecord = new Attendance({
       studentId,
       classId,
-      sessionId: qrSession._id, // Use QRCodeSession's ObjectId instead of sessionId string
-      scheduleId: qrSession.scheduleId, // Associate with schedule from QR session
-      // status: 'present',
-      studentCoordinates: {
-        latitude: studentCoordinates.latitude, 
-        longitude: studentCoordinates.longitude,
-      },
-      // markedBy: 'student',
+      sessionId: qrSession._id,
+      scheduleId: qrSession.scheduleId,
+      studentCoordinates,
+      status: 'present',
       livenessPassed: true,
+      livenessConfidence: verificationResult.livenessConfidence,
+      faceSimilarity: verificationResult.similarity,
       timestamp: new Date(),
       manualEntry: false,
     });
 
     await attendanceRecord.save();
+    console.log('✅ [Attendance] Attendance saved successfully');
 
+    // --- 7. Return Success Response ---
     res.status(201).json({
+      success: true,
       message: 'Attendance marked successfully!',
-      attendance: attendanceRecord,
+      data: {
+        attendanceId: attendanceRecord._id,
+        classId,
+        timestamp: attendanceRecord.timestamp,
+        livenessConfidence: verificationResult.livenessConfidence,
+        faceSimilarity: verificationResult.similarity
+      }
     });
 
   } catch (error) {
-    console.error('Error submitting attendance:', error);
-    if (error.message.includes('Face could not be verified')) {
-      return res.status(401).json({ message: error.message });
-    }
-    res.status(500).json({ message: error.message || 'An unexpected server error occurred.' });
+    console.error('❌ [Attendance] Error submitting attendance:', error);
+    
+    res.status(500).json({ 
+      success: false,
+      message: 'An unexpected error occurred. Please try again.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
@@ -269,11 +371,17 @@ export const getMyAttendanceSummary = async (req, res) => {
 
     // 2. Find total held sessions (Denominator)
     // A "held" session is one that is in the past and was not 'cancelled'
-    const totalHeldSessions = await Attendance.countDocuments({
+    // const totalHeldSessions = await Attendance.countDocuments({
+    //   classId: { $in: classIds },
+    //   timestamp: { $lte: new Date() },
+    //   // scheduledDate: { $lte: new Date() }, // In the past or today
+    //   // status: { $ne: 'cancelled' }
+    // });
+
+    const heldSessionIds = await Attendance.distinct('sessionId', {
       classId: { $in: classIds },
-      // scheduledDate: { $lte: new Date() }, // In the past or today
-      // status: { $ne: 'cancelled' }
-    });
+    })
+    const totalHeldSessions = heldSessionIds.length;
 
     // 3. Find total attended sessions (Numerator)
     const totalAttendedSessions = await Attendance.countDocuments({
@@ -315,11 +423,16 @@ export const getMyClassAttendanceSummary = async (req, res) => {
     const { classId } = req.params;
 
     // 1. Find total held sessions for this class (Denominator)
-    const totalHeldSessions = await ScheduleInstance.countDocuments({
+    // const totalHeldSessions = await Attendance.countDocuments({
+    //   classId: classId,
+    //   timestamp: { $lte: new Date() },
+    //   // scheduledDate: { $lte: new Date() },
+    //   // status: { $ne: 'cancelled' }
+    // });
+    const heldSessionIds = await Attendance.distinct('sessionId', {
       classId: classId,
-      scheduledDate: { $lte: new Date() },
-      status: { $ne: 'cancelled' }
     });
+    const totalHeldSessions = heldSessionIds.length;
 
     // 2. Find total attended sessions for this class (Numerator)
     const totalAttendedSessions = await Attendance.countDocuments({
@@ -649,5 +762,228 @@ export const getFullAttendanceReport = async (req, res) => {
   } catch (error) {
     console.error('Error generating full report:', error);
     res.status(500).json({ message: error.message });
+  }
+};
+
+/**
+ * @desc    Get random liveness challenges for the student
+ * @route   GET /api/student/attendance/liveness/challenges
+ * @access  Private (Student)
+ */
+export const getLivenessChallenges = async (req, res) => {
+  try {
+    // Define all possible challenges
+    const allChallenges = [
+      { type: 'neutral', instruction: 'Look straight at the camera', icon: 'face-man' },
+      { type: 'smile', instruction: 'Smile at the camera', icon: 'emoticon-happy' },
+      { type: 'turn_left', instruction: 'Turn your head slightly left', icon: 'arrow-left' },
+      { type: 'turn_right', instruction: 'Turn your head slightly right', icon: 'arrow-right' },
+      { type: 'eyes_open', instruction: 'Open your eyes wide', icon: 'eye' },
+    ];
+
+    // Shuffle and select 3 random challenges (always include neutral first)
+    const shuffled = allChallenges.slice(1).sort(() => Math.random() - 0.5);
+    const selectedChallenges = [
+      allChallenges[0], // Always start with neutral
+      ...shuffled.slice(0, 2) // Add 2 random challenges
+    ];
+
+    res.status(200).json({
+      success: true,
+      challenges: selectedChallenges,
+      message: 'Complete these challenges to verify your identity'
+    });
+  } catch (error) {
+    console.error('Error generating challenges:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to generate liveness challenges' 
+    });
+  }
+};
+
+/**
+ * @desc    Submit attendance with enhanced liveness check (face images for challenges)
+ * @route   POST /api/student/attendance/verify
+ * @access  Private (Student)
+ * 
+ * Expected Body:
+ * {
+ *   "classId": "64f1a2b3c4d5e6f7g8h9i0j1",
+ *   "studentCoordinates": { "latitude": 18.123, "longitude": 73.456 },
+ *   "challengeImages": [
+ *     { "challengeType": "neutral", "image": "base64..." },
+ *     { "challengeType": "smile", "image": "base64..." },
+ *     { "challengeType": "turn_left", "image": "base64..." }
+ *   ]
+ * }
+ */
+export const submitAttendanceWithFaceVerification = async (req, res) => {
+  console.log('🔄 [Attendance] Starting enhanced face verification');
+  try {
+    const { 
+      classId, 
+      studentCoordinates,
+      challengeImages // Array of { challengeType, image (base64) }
+    } = req.body;
+    
+    const studentId = req.user.id;
+
+    // --- 1. Input Validation ---
+    if (!classId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Class ID is required.' 
+      });
+    }
+    if (!studentCoordinates?.latitude || !studentCoordinates?.longitude) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Student coordinates are required.' 
+      });
+    }
+    if (!challengeImages || !Array.isArray(challengeImages) || challengeImages.length < 2) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'At least 2 challenge images are required.' 
+      });
+    }
+
+    // --- 2. Verify QR Session is Active ---
+    console.log('🔍 [Attendance] Verifying QR session for class:', classId);
+    
+    const qrSession = await QRCodeSession.findOne({
+      classId,
+      isActive: true,
+      sessionExpiresAt: { $gt: new Date() }
+    });
+
+    if (!qrSession) {
+      console.log('❌ [Attendance] No active QR session found');
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No active attendance session. QR code may have expired.' 
+      });
+    }
+    console.log('✅ [Attendance] QR session verified:', qrSession.sessionId);
+    
+    // --- 3. Check for Duplicate Attendance ---
+    const existingAttendance = await Attendance.findOne({ 
+      studentId, 
+      sessionId: qrSession._id 
+    });
+    
+    if (existingAttendance) {
+      console.log('⚠️ [Attendance] Duplicate attempt detected');
+      return res.status(409).json({ 
+        success: false, 
+        message: 'Attendance already marked for this session.' 
+      });
+    }
+    console.log('✅ [Attendance] No duplicate found');
+
+    // --- 4. Get Student Profile with Face Image ---
+    const student = await User.findById(studentId);
+    
+    if (!student) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Student not found.' 
+      });
+    }
+    
+    if (!student.faceImageS3Key) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No profile photo registered. Please upload your face photo first.' 
+      });
+    }
+    console.log(`👤 [Attendance] Student found: ${student.fullName}`);
+    
+    // --- 5. Convert base64 images to buffers and verify ---
+    console.log(`🔐 [Attendance] Processing ${challengeImages.length} challenge images`);
+    
+    const processedChallenges = challengeImages.map(({ challengeType, image }) => {
+      // Remove data URL prefix if present
+      const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+      const imageBytes = Buffer.from(base64Data, 'base64');
+      return { challengeType, imageBytes };
+    });
+
+    // --- 6. Verify Liveness with Challenges ---
+    const verificationResult = await verifyLivenessWithChallenges(
+      processedChallenges,
+      student.faceImageS3Key
+    );
+
+    if (!verificationResult.success) {
+      console.log(`❌ [Attendance] Verification failed: ${verificationResult.reason}`);
+      
+      const errorMessages = {
+        'NO_FACE_DETECTED': 'No face detected. Please position your face clearly.',
+        'MULTIPLE_FACES': 'Multiple faces detected. Only your face should be visible.',
+        'LOW_CONFIDENCE': 'Face not clear. Please improve lighting.',
+        'FACE_NOT_FRONTAL': 'Please face the camera directly.',
+        'LOW_BRIGHTNESS': 'Image too dark. Please improve lighting.',
+        'LOW_SHARPNESS': 'Image blurry. Please hold steady.',
+        'LIVENESS_CHALLENGES_FAILED': verificationResult.message,
+        'FACE_NOT_MATCHED': 'Face does not match your registered profile.',
+        'PROFILE_IMAGE_NOT_FOUND': 'Profile image not found. Please re-upload your photo.',
+        'INVALID_IMAGE': 'Invalid image captured. Please try again.'
+      };
+
+      return res.status(400).json({ 
+        success: false,
+        reason: verificationResult.reason,
+        challengeResults: verificationResult.challengeResults,
+        message: errorMessages[verificationResult.reason] || verificationResult.message
+      });
+    }
+
+    console.log(`✅ [Attendance] Identity Verified!`);
+    console.log(`   Liveness Score: ${verificationResult.livenessScore}%`);
+    console.log(`   Face Similarity: ${verificationResult.similarity}%`);
+
+    // --- 7. Save Attendance Record ---
+    console.log('💾 [Attendance] Saving attendance record');
+    
+    const attendanceRecord = new Attendance({
+      studentId,
+      classId,
+      sessionId: qrSession._id,
+      scheduleId: qrSession.scheduleId,
+      studentCoordinates,
+      status: 'present',
+      livenessPassed: true,
+      livenessConfidence: verificationResult.livenessScore,
+      faceSimilarity: verificationResult.similarity,
+      timestamp: new Date(),
+      manualEntry: false,
+    });
+
+    await attendanceRecord.save();
+    console.log('✅ [Attendance] Attendance saved successfully');
+
+    // --- 8. Return Success Response ---
+    res.status(201).json({
+      success: true,
+      message: 'Attendance marked successfully!',
+      data: {
+        attendanceId: attendanceRecord._id,
+        classId,
+        timestamp: attendanceRecord.timestamp,
+        livenessScore: verificationResult.livenessScore,
+        faceSimilarity: verificationResult.similarity
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ [Attendance] Error:', error);
+    
+    res.status(500).json({ 
+      success: false,
+      message: 'An unexpected error occurred. Please try again.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };

@@ -63,17 +63,19 @@ export const getEnrolledClasses = async (req, res) => {
         select: 'classNumber subjectCode subjectName classYear semester division teacherId teacherName'
       });
 
-    const classes = enrollments.map(enrollment => ({
-      _id: enrollment.classId._id,
-      classNumber: enrollment.classId.classNumber,
-      subjectCode: enrollment.classId.subjectCode,
-      subjectName: enrollment.classId.subjectName,
-      classYear: enrollment.classId.classYear,
-      semester: enrollment.classId.semester,
-      division: enrollment.classId.division,
-      teacherId: enrollment.classId.teacherId,
-      teacherName: enrollment.classId.teacherName
-    }));
+    const classes = enrollments
+      .filter(enrollment => enrollment.classId) // Filter out enrollments with null classId
+      .map(enrollment => ({
+        _id: enrollment.classId._id,
+        classNumber: enrollment.classId.classNumber,
+        subjectCode: enrollment.classId.subjectCode,
+        subjectName: enrollment.classId.subjectName,
+        classYear: enrollment.classId.classYear,
+        semester: enrollment.classId.semester,
+        division: enrollment.classId.division,
+        teacherId: enrollment.classId.teacherId,
+        teacherName: enrollment.classId.teacherName
+      }));
 
     res.json(classes);
 

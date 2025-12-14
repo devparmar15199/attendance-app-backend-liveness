@@ -1,16 +1,33 @@
 import express from 'express';
-import {  
+import {
+    startAttendanceSession,
     submitAttendance,
     syncAttendance,
     getMyAttendanceRecords,
     getMyAttendanceRecordsByClass,
     getMyAttendanceSummary,
     getMyClassAttendanceSummary,
+    getLivenessChallenges,
+    submitAttendanceWithFaceVerification,
 } from '../controllers/attendanceController.js';
 
 import { protect } from '../../middleware/authMiddleware.js';
 
 const router = express.Router();
+
+/**
+ * @route   GET /api/student/attendance/liveness/init
+ * @desc    Get a session ID from AWS to start the face scan
+ * @access  Private (Student)
+ */
+router.get('/liveness/init', protect, startAttendanceSession);
+
+/**
+ * @route   GET /api/student/attendance/liveness/challenges
+ * @desc    Get random liveness challenges for enhanced face verification
+ * @access  Private (Student)
+ */
+router.get('/liveness/challenges', protect, getLivenessChallenges);
 
 // --- POST Routes (Submitting Data) ---
 
@@ -20,6 +37,13 @@ const router = express.Router();
  * @access  Private (Student)
  */
 router.post('/', protect, submitAttendance);
+
+/**
+ * @route   POST /api/student/attendance/verify
+ * @desc    Submit attendance with enhanced liveness verification (multiple face images)
+ * @access  Private (Student)
+ */
+router.post('/verify', protect, submitAttendanceWithFaceVerification);
 
 /**
  * @route   POST /api/student/attendance/sync
