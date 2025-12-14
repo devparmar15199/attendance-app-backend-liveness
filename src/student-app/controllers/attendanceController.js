@@ -3,51 +3,15 @@ import { QRCodeSession } from '../../models/qrCodeSessionModel.js';
 import { ClassEnrollment } from '../../models/classEnrollmentModel.js';
 import { User } from '../../models/userModel.js';
 import { ScheduleInstance } from '../../models/recurringScheduleModel.js';
-import { Class } from '../../models/classModel.js';
-import { 
-  createLivenessSession,
-  verifyLivenessAndCompare,
-  getLivenessSessionResults
-} from '../../AWS/faceLivenessService.js';
 import {
   verifyLivenessWithChallenges,
-  compareFaceWithProfile,
-  validateLivenessChallenge
 } from '../../AWS/faceComparisonService.js';
-
-/**
- * @desc    Start a face liveness session (Step 1)
- * @route   GET /api/student/attendance/liveness/init
- * @access  Private (Student)
- */
-export const startAttendanceSession = async (req, res) => {
-  try {
-    const userId = req.user.id;
-
-    // Create AWS Liveness session
-    const sessionId = await createLivenessSession(userId);
-
-    console.log(`✅ [Liveness] Session created for user ${userId}: ${sessionId}`);
-    
-    res.status(200).json({ 
-      success: true,
-      sessionId,
-      message: 'Liveness session created. Proceed with face scan.'
-    });
-  } catch (error) {
-    console.error('❌ [Liveness] Failed to create session:', error);
-    res.status(500).json({ 
-      success: false,
-      message: 'Failed to start face verification session.',
-      error: error.message 
-    });
-  }
-};
 
 /**
  * @desc    Submit attendance after frontend completes liveness check (Step 2)
  * @route   POST /api/student/attendance
  * @access  Private (Student)
+ * @deprecated Not used anymore for submitting attendance
  * 
  * Expected Body:
  * {
@@ -56,165 +20,165 @@ export const startAttendanceSession = async (req, res) => {
  *   "studentCoordinates": { "latitude": 18.123, "longitude": 73.456 }
  * }
  */
-export const submitAttendance = async (req, res) => {
-  console.log('🔄 [Attendance] Starting attendance submission');
-  try {
-    const { 
-      sessionId, 
-      classId, 
-      studentCoordinates
-    } = req.body;
+// export const submitAttendance = async (req, res) => {
+//   console.log('🔄 [Attendance] Starting attendance submission');
+//   try {
+//     const { 
+//       sessionId, 
+//       classId, 
+//       studentCoordinates
+//     } = req.body;
     
-    const studentId = req.user.id;
+//     const studentId = req.user.id;
 
-    // --- 1. Input Validation ---
-    if (!sessionId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Liveness session ID is required.' 
-      });
-    }
-    if (!classId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Class ID is required.' 
-      });
-    }
-    if (!studentCoordinates?.latitude || !studentCoordinates?.longitude) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Student coordinates are required.' 
-      });
-    }
+//     // --- 1. Input Validation ---
+//     if (!sessionId) {
+//       return res.status(400).json({ 
+//         success: false, 
+//         message: 'Liveness session ID is required.' 
+//       });
+//     }
+//     if (!classId) {
+//       return res.status(400).json({ 
+//         success: false, 
+//         message: 'Class ID is required.' 
+//       });
+//     }
+//     if (!studentCoordinates?.latitude || !studentCoordinates?.longitude) {
+//       return res.status(400).json({ 
+//         success: false, 
+//         message: 'Student coordinates are required.' 
+//       });
+//     }
 
-    // --- 2. Verify QR Session is Active ---
-    console.log('🔍 [Attendance] Verifying QR session for class:', classId);
+//     // --- 2. Verify QR Session is Active ---
+//     console.log('🔍 [Attendance] Verifying QR session for class:', classId);
     
-    const qrSession = await QRCodeSession.findOne({
-      classId,
-      isActive: true,
-      sessionExpiresAt: { $gt: new Date() }
-    });
+//     const qrSession = await QRCodeSession.findOne({
+//       classId,
+//       isActive: true,
+//       sessionExpiresAt: { $gt: new Date() }
+//     });
 
-    if (!qrSession) {
-      console.log('❌ [Attendance] No active QR session found');
-      return res.status(400).json({ 
-        success: false, 
-        message: 'No active attendance session. QR code may have expired.' 
-      });
-    }
-    console.log('✅ [Attendance] QR session verified:', qrSession.sessionId);
+//     if (!qrSession) {
+//       console.log('❌ [Attendance] No active QR session found');
+//       return res.status(400).json({ 
+//         success: false, 
+//         message: 'No active attendance session. QR code may have expired.' 
+//       });
+//     }
+//     console.log('✅ [Attendance] QR session verified:', qrSession.sessionId);
     
-    // --- 3. Check for Duplicate Attendance ---
-    const existingAttendance = await Attendance.findOne({ 
-      studentId, 
-      sessionId: qrSession._id 
-    });
+//     // --- 3. Check for Duplicate Attendance ---
+//     const existingAttendance = await Attendance.findOne({ 
+//       studentId, 
+//       sessionId: qrSession._id 
+//     });
     
-    if (existingAttendance) {
-      console.log('⚠️ [Attendance] Duplicate attempt detected');
-      return res.status(409).json({ 
-        success: false, 
-        message: 'Attendance already marked for this session.' 
-      });
-    }
-    console.log('✅ [Attendance] No duplicate found');
+//     if (existingAttendance) {
+//       console.log('⚠️ [Attendance] Duplicate attempt detected');
+//       return res.status(409).json({ 
+//         success: false, 
+//         message: 'Attendance already marked for this session.' 
+//       });
+//     }
+//     console.log('✅ [Attendance] No duplicate found');
 
-    // --- 4. Get Student Profile with Face Image ---
-    const student = await User.findById(studentId);
+//     // --- 4. Get Student Profile with Face Image ---
+//     const student = await User.findById(studentId);
     
-    if (!student) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Student not found.' 
-      });
-    }
+//     if (!student) {
+//       return res.status(404).json({ 
+//         success: false, 
+//         message: 'Student not found.' 
+//       });
+//     }
     
-    if (!student.faceImageS3Key) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'No profile photo registered. Please upload your face photo first.' 
-      });
-    }
-    console.log(`👤 [Attendance] Student found: ${student.fullName}`);
+//     if (!student.faceImageS3Key) {
+//       return res.status(400).json({ 
+//         success: false, 
+//         message: 'No profile photo registered. Please upload your face photo first.' 
+//       });
+//     }
+//     console.log(`👤 [Attendance] Student found: ${student.fullName}`);
     
-    // --- 5. 🔐 VERIFY LIVENESS & FACE MATCH ---
-    console.log(`🤖 [Attendance] Verifying liveness session: ${sessionId}`);
-    console.log(`🖼️ [Attendance] Comparing with stored image: ${student.faceImageS3Key}`);
+//     // --- 5. 🔐 VERIFY LIVENESS & FACE MATCH ---
+//     console.log(`🤖 [Attendance] Verifying liveness session: ${sessionId}`);
+//     console.log(`🖼️ [Attendance] Comparing with stored image: ${student.faceImageS3Key}`);
     
-    const verificationResult = await verifyLivenessAndCompare(
-      sessionId, 
-      student.faceImageS3Key
-    );
+//     const verificationResult = await verifyLivenessAndCompare(
+//       sessionId, 
+//       student.faceImageS3Key
+//     );
 
-    // Handle verification failure
-    if (!verificationResult.success) {
-      console.log(`❌ [Attendance] Verification failed: ${verificationResult.reason}`);
+//     // Handle verification failure
+//     if (!verificationResult.success) {
+//       console.log(`❌ [Attendance] Verification failed: ${verificationResult.reason}`);
       
-      // Return appropriate error based on failure reason
-      const errorMessages = {
-        'LIVENESS_NOT_COMPLETED': 'Please complete the face scan properly.',
-        'LOW_CONFIDENCE': 'Liveness check failed. Ensure good lighting and try again.',
-        'NO_REFERENCE_IMAGE': 'Face scan did not capture properly. Please retry.',
-        'FACE_NOT_MATCHED': 'Face does not match your registered profile.',
-        'INVALID_SESSION': 'Session expired. Please scan QR code again.',
-        'PROFILE_IMAGE_NOT_FOUND': 'Profile image not found. Please re-upload your photo.'
-      };
+//       // Return appropriate error based on failure reason
+//       const errorMessages = {
+//         'LIVENESS_NOT_COMPLETED': 'Please complete the face scan properly.',
+//         'LOW_CONFIDENCE': 'Liveness check failed. Ensure good lighting and try again.',
+//         'NO_REFERENCE_IMAGE': 'Face scan did not capture properly. Please retry.',
+//         'FACE_NOT_MATCHED': 'Face does not match your registered profile.',
+//         'INVALID_SESSION': 'Session expired. Please scan QR code again.',
+//         'PROFILE_IMAGE_NOT_FOUND': 'Profile image not found. Please re-upload your photo.'
+//       };
 
-      return res.status(400).json({ 
-        success: false,
-        reason: verificationResult.reason,
-        message: errorMessages[verificationResult.reason] || verificationResult.message
-      });
-    }
+//       return res.status(400).json({ 
+//         success: false,
+//         reason: verificationResult.reason,
+//         message: errorMessages[verificationResult.reason] || verificationResult.message
+//       });
+//     }
 
-    console.log(`✅ [Attendance] Identity Verified!`);
-    console.log(`   Liveness Confidence: ${verificationResult.livenessConfidence}%`);
-    console.log(`   Face Similarity: ${verificationResult.similarity}%`);
+//     console.log(`✅ [Attendance] Identity Verified!`);
+//     console.log(`   Liveness Confidence: ${verificationResult.livenessConfidence}%`);
+//     console.log(`   Face Similarity: ${verificationResult.similarity}%`);
 
-    // --- 6. Save Attendance Record ---
-    console.log('💾 [Attendance] Saving attendance record');
+//     // --- 6. Save Attendance Record ---
+//     console.log('💾 [Attendance] Saving attendance record');
     
-    const attendanceRecord = new Attendance({
-      studentId,
-      classId,
-      sessionId: qrSession._id,
-      scheduleId: qrSession.scheduleId,
-      studentCoordinates,
-      status: 'present',
-      livenessPassed: true,
-      livenessConfidence: verificationResult.livenessConfidence,
-      faceSimilarity: verificationResult.similarity,
-      timestamp: new Date(),
-      manualEntry: false,
-    });
+//     const attendanceRecord = new Attendance({
+//       studentId,
+//       classId,
+//       sessionId: qrSession._id,
+//       scheduleId: qrSession.scheduleId,
+//       studentCoordinates,
+//       status: 'present',
+//       livenessPassed: true,
+//       livenessConfidence: verificationResult.livenessConfidence,
+//       faceSimilarity: verificationResult.similarity,
+//       timestamp: new Date(),
+//       manualEntry: false,
+//     });
 
-    await attendanceRecord.save();
-    console.log('✅ [Attendance] Attendance saved successfully');
+//     await attendanceRecord.save();
+//     console.log('✅ [Attendance] Attendance saved successfully');
 
-    // --- 7. Return Success Response ---
-    res.status(201).json({
-      success: true,
-      message: 'Attendance marked successfully!',
-      data: {
-        attendanceId: attendanceRecord._id,
-        classId,
-        timestamp: attendanceRecord.timestamp,
-        livenessConfidence: verificationResult.livenessConfidence,
-        faceSimilarity: verificationResult.similarity
-      }
-    });
+//     // --- 7. Return Success Response ---
+//     res.status(201).json({
+//       success: true,
+//       message: 'Attendance marked successfully!',
+//       data: {
+//         attendanceId: attendanceRecord._id,
+//         classId,
+//         timestamp: attendanceRecord.timestamp,
+//         livenessConfidence: verificationResult.livenessConfidence,
+//         faceSimilarity: verificationResult.similarity
+//       }
+//     });
 
-  } catch (error) {
-    console.error('❌ [Attendance] Error submitting attendance:', error);
+//   } catch (error) {
+//     console.error('❌ [Attendance] Error submitting attendance:', error);
     
-    res.status(500).json({ 
-      success: false,
-      message: 'An unexpected error occurred. Please try again.',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
+//     res.status(500).json({ 
+//       success: false,
+//       message: 'An unexpected error occurred. Please try again.',
+//       error: process.env.NODE_ENV === 'development' ? error.message : undefined
+//     });
+//   }
+// };
 
 
 /**

@@ -1,7 +1,5 @@
 import express from 'express';
 import {
-    startAttendanceSession,
-    submitAttendance,
     syncAttendance,
     getMyAttendanceRecords,
     getMyAttendanceRecordsByClass,
@@ -16,13 +14,6 @@ import { protect } from '../../middleware/authMiddleware.js';
 const router = express.Router();
 
 /**
- * @route   GET /api/student/attendance/liveness/init
- * @desc    Get a session ID from AWS to start the face scan
- * @access  Private (Student)
- */
-router.get('/liveness/init', protect, startAttendanceSession);
-
-/**
  * @route   GET /api/student/attendance/liveness/challenges
  * @desc    Get random liveness challenges for enhanced face verification
  * @access  Private (Student)
@@ -35,8 +26,9 @@ router.get('/liveness/challenges', protect, getLivenessChallenges);
  * @route   POST /api/student/attendance/
  * @desc    Submit a new attendance record (main endpoint for QR/Face scan)
  * @access  Private (Student)
+ * @deprecated not used anymore
  */
-router.post('/', protect, submitAttendance);
+// router.post('/', protect, submitAttendance);
 
 /**
  * @route   POST /api/student/attendance/verify
